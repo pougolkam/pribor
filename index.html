@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Приборка</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Приборка">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0b08">
+<style>
+/* Layout: top status bar / speedometer left, roll + pitch dials right / four data tiles at the bottom.
+   Look: black cluster, amber backlight, painted danger sectors like a field inclinometer.
+   Written for iOS 12 Safari: no flex gap, no inset, no aspect-ratio, no clamp(). */
+:root{
+  --bg:#0a0b08; --panel:#11130d; --panel2:#181a11; --line:#2b2e20;
+  --ink:#ece6d0; --dim:#8a866f;
+  --amber:#ffa826; --amber-dim:#5a3d0e;
+  --ok:#8fcf4e; --warn:#ffd13d; --bad:#ff4a36;
+  --num:"DIN Alternate","Avenir Next Condensed","Arial Narrow",Helvetica,sans-serif;
+  --lab:"Avenir Next Condensed","DIN Alternate","Arial Narrow",Helvetica,sans-serif;
+  --mono:Menlo,"Courier New",monospace;
+}
+body.night{
+  --bg:#060504; --panel:#0d0b09; --panel2:#120e0b; --line:#2a1d15;
+  --ink:#b9755a; --dim:#6e4a3c; --amber:#c7571b; --amber-dim:#3e1d0b;
+  --ok:#6f8b3f; --warn:#b8861f; --bad:#c03022;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden;
+  font-family:var(--lab);-webkit-text-size-adjust:100%;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+#app{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.bar{flex:none;height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 12px}
+.bar .l,.bar .r{display:flex;align-items:center}
+.brand{font:700 22px var(--lab);letter-spacing:.28em;color:var(--amber);margin-right:16px}
+.brand small{font-weight:600;color:var(--dim);letter-spacing:.2em;margin-left:8px;font-size:15px}
+.chip{display:flex;align-items:center;height:34px;padding:0 12px;border:1px solid var(--line);
+  border-radius:17px;background:var(--panel);font:600 14px var(--lab);letter-spacing:.1em;
+  text-transform:uppercase;margin-right:8px;white-space:nowrap}
+.chip i{display:block;width:10px;height:10px;border-radius:5px;margin-right:8px;background:var(--dim)}
+.chip i.ok{background:var(--ok)} .chip i.wait{background:var(--warn)} .chip i.bad{background:var(--bad)}
+.btn{height:42px;min-width:42px;padding:0 14px;margin-left:8px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--ink);border-radius:10px;font:600 15px var(--lab);
+  letter-spacing:.08em;text-transform:uppercase}
+.btn:active{background:var(--amber);color:#1a1200}
+.btn.wide{width:100%;margin:14px 0 0}
+.main{flex:1;min-height:0;display:grid;grid-template-columns:1.2fr 1fr;grid-gap:12px;padding:0 12px}
+.speedo,.dial{position:relative;min-height:0;min-width:0}
+.speedo svg,.dial svg{position:absolute;top:0;left:0;width:100%;height:100%;display:block}
+.dial{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.right{display:grid;grid-template-rows:1fr 1fr;grid-gap:10px;min-height:0;min-width:0}
+.foot{flex:none;display:grid;grid-template-columns:repeat(4,1fr);grid-gap:10px;padding:10px 12px 12px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 14px 10px;min-width:0}
+.tl{font-size:13px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase}
+.tv{font:600 40px/1.1 var(--num);white-space:nowrap}
+.tv small{font:600 16px var(--lab);color:var(--dim);margin-left:6px;letter-spacing:.06em}
+.meter{height:5px;background:#1d1f15;border-radius:3px;margin-top:5px;overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--amber)}
+svg text{font-family:var(--num)}
+.spnum{font:600 25px var(--num);fill:var(--ink)}
+.lab{font:600 17px var(--lab);fill:var(--dim);letter-spacing:.2em}
+.blink{animation:bl .55s steps(2) infinite}
+@keyframes bl{50%{opacity:.2}}
+@media (orientation:portrait){
+  .main{grid-template-columns:1fr;grid-template-rows:1.15fr 1fr}
+  .right{grid-template-rows:1fr;grid-template-columns:1fr 1fr}
+  .foot{grid-template-columns:repeat(2,1fr)}
+  .brand small{display:none}
+}
+.start,.sheet{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center}
+.start{background:rgba(6,7,5,.95);z-index:30;text-align:center}
+.sheet{background:rgba(6,7,5,.82);z-index:40}
+.start[hidden],.sheet[hidden],.toast[hidden]{display:none}
+.card{width:560px;max-width:92%;max-height:94%;overflow:auto;background:var(--panel);
+  border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+.card h2{margin:0 0 6px;font:700 24px var(--lab);letter-spacing:.2em;color:var(--amber);text-transform:uppercase}
+.card p{margin:8px 0;color:var(--dim);font-size:17px;line-height:1.4}
+.row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line)}
+.row label{font-size:18px;margin-right:12px}
+.seg{display:flex}
+.seg button,.tg{height:40px;padding:0 14px;border:1px solid var(--line);background:var(--panel2);
+  color:var(--ink);font:600 16px var(--lab);letter-spacing:.06em;margin-left:-1px}
+.seg button:first-child{border-radius:9px 0 0 9px;margin-left:0}
+.seg button:last-child{border-radius:0 9px 9px 0}
+.tg{border-radius:9px;min-width:84px}
+.seg button.on,.tg.on{background:var(--amber);color:#1a1200;border-color:var(--amber)}
+input[type=number]{width:84px;height:40px;border:1px solid var(--line);background:var(--panel2);
+  color:var(--ink);border-radius:9px;font:600 20px var(--num);text-align:center;-webkit-user-select:text}
+.hint{color:var(--dim);font-size:15px;margin-left:10px}
+.dbg{font:12px/1.5 var(--mono);color:var(--dim);margin-top:10px;white-space:pre-wrap}
+.toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);z-index:60;background:#23261a;
+  border:1px solid var(--amber-dim);color:var(--ink);padding:11px 18px;border-radius:10px;
+  font-size:17px;max-width:72%;text-align:center}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="bar">
+    <div class="l">
+      <div class="brand">ПРИБОРКА<small>4×4</small></div>
+      <div class="chip"><i id="dot"></i><span id="chipTxt">Демо-данные</span></div>
+      <div class="chip"><i id="sdot"></i><span id="sTxt">Датчик</span></div>
+    </div>
+    <div class="r">
+      <button class="btn" id="btnCal">Ноль</button>
+      <button class="btn" id="btnMax">Макс ×</button>
+      <button class="btn" id="btnNight">Ночь</button>
+      <button class="btn" id="btnSet">Меню</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="speedo"><svg id="svSpeed" viewBox="0 0 440 440" preserveAspectRatio="xMidYMid meet"></svg></div>
+    <div class="right">
+      <div class="dial"><svg id="svRoll" viewBox="0 0 440 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="dial"><svg id="svPitch" viewBox="0 0 440 300" preserveAspectRatio="xMidYMid meet"></svg></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="tile"><div class="tl">Обороты</div><div class="tv"><span id="vRpm">—</span><small>об/мин</small></div><div class="meter"><i id="mRpm"></i></div></div>
+    <div class="tile"><div class="tl">Темп. ОЖ</div><div class="tv"><span id="vClt">—</span><small>°C</small></div></div>
+    <div class="tile"><div class="tl">Бортсеть</div><div class="tv"><span id="vVolt">—</span><small>В</small></div></div>
+    <div class="tile"><div class="tl">Дроссель</div><div class="tv"><span id="vThr">—</span><small>%</small></div></div>
+  </div>
+</div>
+
+<div class="start" id="start">
+  <div class="card">
+    <h2>Приборка</h2>
+    <p>Перед поездкой закрепите iPad и поставьте автомобиль на ровную площадку. Нажмите «Поехали», затем «Ноль», чтобы задать нулевой крен и тангаж.</p>
+    <button class="btn wide" id="btnStart">Поехали</button>
+  </div>
+</div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="card">
+    <h2>Настройки</h2>
+    <div class="row"><label>Источник скорости</label>
+      <div class="seg" id="segSrc"><button data-v="demo">Демо</button><button data-v="gps">GPS</button><button data-v="obd">OBD BLE</button></div></div>
+    <div class="row"><label>OBD-адаптер</label>
+      <div style="display:flex;align-items:center"><button class="btn" id="btnObd" style="margin:0">Подключить</button><span class="hint" id="obdTxt"></span></div></div>
+    <div class="row"><label>Шкала спидометра, км/ч</label>
+      <div class="seg" id="segMax"><button data-v="160">160</button><button data-v="180">180</button><button data-v="200">200</button></div></div>
+    <div class="row"><label>Жёлтая зона от, °</label><input id="inWarn" type="number" min="5" max="60"></div>
+    <div class="row"><label>Красная зона от, °</label><input id="inDanger" type="number" min="10" max="70"></div>
+    <div class="row"><label>Инвертировать крен</label><button class="tg" id="tgRoll"></button></div>
+    <div class="row"><label>Инвертировать тангаж</label><button class="tg" id="tgPitch"></button></div>
+    <div class="row"><label>Датчик показывает «вверх»</label><button class="tg" id="tgG"></button></div>
+    <div class="dbg" id="dbg"></div>
+    <button class="btn wide" id="btnClose">Готово</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+'use strict';
+var NS='http://www.w3.org/2000/svg';
+function $(id){return document.getElementById(id);}
+function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a){e.setAttribute(k,a[k]);}if(p){p.appendChild(e);}return e;}
+function clr(n){while(n.firstChild){n.removeChild(n.firstChild);}}
+function clamp(v,a,b){return v<a?a:(v>b?b:v);}
+function polar(cx,cy,r,deg){var a=(deg-90)*Math.PI/180;return [cx+r*Math.cos(a),cy+r*Math.sin(a)];}
+function arc(cx,cy,r,a0,a1){
+  var p0=polar(cx,cy,r,a0),p1=polar(cx,cy,r,a1),lg=(a1-a0)>180?1:0;
+  return 'M'+p0[0].toFixed(1)+' '+p0[1].toFixed(1)+' A'+r+' '+r+' 0 '+lg+' 1 '+p1[0].toFixed(1)+' '+p1[1].toFixed(1);
+}
+var R2D=180/Math.PI;
+
+/* ---------- settings ---------- */
+var S={src:'demo',vmax:160,warn:25,danger:35,fRoll:false,fPitch:false,fG:1,gAuto:true,night:false,d0:{}};
+try{var js=localStorage.getItem('pribor.v1');if(js){var o0=JSON.parse(js);for(var k0 in o0){S[k0]=o0[k0];}}}catch(e){}
+function save(){try{localStorage.setItem('pribor.v1',JSON.stringify(S));}catch(e){}}
+
+var toastT=null;
+function toast(t,ms){var n=$('toast');n.textContent=t;n.hidden=false;clearTimeout(toastT);toastT=setTimeout(function(){n.hidden=true;},ms||2600);}
+function setLink(txt,cls){$('chipTxt').textContent=txt;$('dot').className=cls||'';}
+
+/* ---------- live values ---------- */
+var live={};
+function setL(k,v){live[k]={v:v,t:Date.now()};}
+function getL(k,age){var o=live[k];return (o&&Date.now()-o.t<age)?o.v:null;}
+
+/* ---------- speedometer ---------- */
+var sp={};
+function sAng(v){return -120+240*clamp(v/S.vmax,0,1);}
+function buildSpeed(){
+  var svg=$('svSpeed');clr(svg);
+  el('circle',{cx:220,cy:220,r:214,style:'fill:#0d0f0a;stroke:var(--line);stroke-width:2'},svg);
+  el('circle',{cx:220,cy:220,r:203,style:'fill:none;stroke:var(--amber-dim);stroke-width:1'},svg);
+  var g=el('g',{},svg),v;
+  for(v=0;v<=S.vmax;v+=10){
+    var major=(v%20===0),a=sAng(v),p1=polar(220,220,major?174:183,a),p2=polar(220,220,195,a);
+    el('line',{x1:p1[0],y1:p1[1],x2:p2[0],y2:p2[1],style:'stroke:'+(major?'var(--ink)':'var(--dim)')+';stroke-width:'+(major?3:1.5)},g);
+    if(major){var pt=polar(220,220,134,a);var t=el('text',{x:pt[0],y:pt[1]+8,'text-anchor':'middle','class':'spnum'},g);t.textContent=v;}
+  }
+  el('path',{d:arc(220,220,167,-120,120),style:'fill:none;stroke:#1d1f15;stroke-width:12'},svg);
+  sp.arc=el('path',{d:'',style:'fill:none;stroke:var(--amber);stroke-width:12'},svg);
+  sp.needle=el('g',{transform:'translate(220 220) rotate(-120)'},svg);
+  el('polygon',{points:'-5,12 5,12 2,-168 -2,-168',style:'fill:var(--amber)'},sp.needle);
+  el('circle',{r:16,style:'fill:#161810;stroke:var(--amber);stroke-width:3'},sp.needle);
+  sp.val=el('text',{x:220,y:322,'text-anchor':'middle',style:'font-size:96px;font-weight:600;fill:var(--ink)'},svg);
+  sp.val.textContent='0';
+  var u=el('text',{x:220,y:350,'text-anchor':'middle','class':'lab'},svg);u.textContent='КМ/Ч';
+  sp.lastA=-999;
+}
+function renderSpeed(v){
+  var a=sAng(v);
+  if(Math.abs(a-sp.lastA)>0.05){
+    sp.lastA=a;
+    sp.needle.setAttribute('transform','translate(220 220) rotate('+a.toFixed(2)+')');
+    sp.arc.setAttribute('d',a>-119.5?arc(220,220,167,-120,a):'');
+  }
+  var t=String(Math.round(v));
+  if(sp.val.textContent!==t){sp.val.textContent=t;}
+}
+
+/* ---------- tilt dials ---------- */
+function carRear(g){
+  var s='fill:#0b0c08;stroke:var(--amber);stroke-width:3;stroke-linejoin:round';
+  el('rect',{x:-62,y:14,width:18,height:34,rx:4,style:s},g);
+  el('rect',{x:44,y:14,width:18,height:34,rx:4,style:s},g);
+  el('path',{d:'M-46,-8 L-38,-46 Q-36,-50 -30,-50 L30,-50 Q36,-50 38,-46 L46,-8 Z',style:s},g);
+  el('rect',{x:-56,y:-10,width:112,height:44,rx:8,style:s},g);
+  el('rect',{x:-30,y:-42,width:60,height:26,rx:5,style:'fill:#1b1d14;stroke:var(--dim);stroke-width:2'},g);
+  el('rect',{x:-52,y:2,width:12,height:10,rx:2,style:'fill:#b3261e'},g);
+  el('rect',{x:40,y:2,width:12,height:10,rx:2,style:'fill:#b3261e'},g);
+  el('circle',{cx:0,cy:12,r:16,style:'fill:#14160e;stroke:var(--amber);stroke-width:3'},g);
+  el('circle',{cx:0,cy:12,r:7,style:'fill:none;stroke:var(--dim);stroke-width:2'},g);
+}
+function carSide(g){
+  var s='fill:#0b0c08;stroke:var(--amber);stroke-width:3;stroke-linejoin:round';
+  el('path',{d:'M-82,30 L-82,-14 L-74,-44 L18,-44 L44,-14 L80,-8 Q84,-6 84,0 L84,30 Z',style:s},g);
+  el('path',{d:'M-68,-14 L-62,-38 L10,-38 L31,-14 Z',style:'fill:#1b1d14;stroke:var(--dim);stroke-width:2'},g);
+  el('circle',{cx:-92,cy:6,r:15,style:'fill:#14160e;stroke:var(--amber);stroke-width:3'},g);
+  el('rect',{x:74,y:-4,width:8,height:9,rx:2,style:'fill:var(--warn)'},g);
+  el('circle',{cx:-50,cy:32,r:18,style:s},g);
+  el('circle',{cx:52,cy:32,r:18,style:s},g);
+  el('circle',{cx:-50,cy:32,r:6,style:'fill:none;stroke:var(--dim);stroke-width:2'},g);
+  el('circle',{cx:52,cy:32,r:6,style:'fill:none;stroke:var(--dim);stroke-width:2'},g);
+}
+function buildDial(svg,title,kind){
+  clr(svg);
+  var cx=220,cy=190,r=136,d={};
+  var t=el('text',{x:20,y:36,'class':'lab'},svg);t.textContent=title;
+  var wz=clamp(S.warn,3,48),dz=clamp(S.danger,wz+1,50);
+  function zone(a0,a1,col){el('path',{d:arc(cx,cy,r,a0,a1),style:'fill:none;stroke:'+col+';stroke-width:10;opacity:.9'},svg);}
+  zone(-50,-dz,'var(--bad)');zone(-dz,-wz,'var(--warn)');zone(-wz,wz,'#3d5a24');zone(wz,dz,'var(--warn)');zone(dz,50,'var(--bad)');
+  var a;
+  for(a=-50;a<=50;a+=5){
+    var maj=(a%10===0),p1=polar(cx,cy,maj?116:123,a),p2=polar(cx,cy,129,a);
+    el('line',{x1:p1[0],y1:p1[1],x2:p2[0],y2:p2[1],style:'stroke:var(--ink);stroke-width:'+(maj?2.5:1.2)},svg);
+    if(maj&&a!==0&&Math.abs(a)<=40&&Math.abs(a)%20===0){
+      var pt=polar(cx,cy,100,a);var tt=el('text',{x:pt[0],y:pt[1]+6,'text-anchor':'middle',style:'font-size:18px;fill:var(--dim)'},svg);tt.textContent=Math.abs(a);
+    }
+  }
+  el('line',{x1:100,y1:cy,x2:340,y2:cy,style:'stroke:var(--dim);stroke-width:1.5;stroke-dasharray:6 6'},svg);
+  d.car=el('g',{transform:'translate('+cx+' '+cy+')'},svg);
+  if(kind==='roll'){carRear(d.car);}else{carSide(d.car);}
+  d.ptr=el('g',{transform:'rotate(0 '+cx+' '+cy+')'},svg);
+  d.tri=el('polygon',{points:(cx-10)+','+(cy-r-20)+' '+(cx+10)+','+(cy-r-20)+' '+cx+','+(cy-r-3),style:'fill:var(--ok)'},d.ptr);
+  d.val=el('text',{x:22,y:284,style:'font-size:66px;font-weight:600;fill:var(--ink)'},svg);d.val.textContent='0°';
+  d.dir=el('text',{x:418,y:262,'text-anchor':'end',style:'font-size:24px;font-weight:600;fill:var(--dim);letter-spacing:.08em'},svg);
+  d.max=el('text',{x:418,y:288,'text-anchor':'end',style:'font-size:17px;fill:var(--dim);letter-spacing:.06em'},svg);
+  d.cx=cx;d.cy=cy;d.kind=kind;d.last=-999;
+  return d;
+}
+var dRoll,dPitch;
+function levelColor(a){a=Math.abs(a);return a>=S.danger?'var(--bad)':(a>=S.warn?'var(--warn)':'var(--ok)');}
+function renderDial(d,ang,dirTxt,maxTxt){
+  var a=clamp(ang,-50,50);
+  if(Math.abs(a-d.last)>0.05){
+    d.last=a;
+    d.ptr.setAttribute('transform','rotate('+a.toFixed(2)+' '+d.cx+' '+d.cy+')');
+    var cr=d.kind==='roll'?a:-a;
+    d.car.setAttribute('transform','translate('+d.cx+' '+d.cy+') rotate('+cr.toFixed(2)+')');
+  }
+  var col=levelColor(ang);
+  d.tri.style.fill=col;
+  d.val.textContent=Math.round(Math.abs(ang))+'°';
+  d.val.style.fill=(Math.abs(ang)>=S.warn)?col:'var(--ink)';
+  d.dir.textContent=dirTxt;
+  d.max.textContent=maxTxt;
+  d.val.setAttribute('class',Math.abs(ang)>=S.danger?'blink':'');
+}
+
+/* ---------- inclinometer (accelerometer gravity vector) ---------- */
+var tilt={roll:0,pitch:0,t:0,sim:false,mR:0,mL:0,mU:0,mD:0};
+var m={f:null,last:0,n:0,sumU:0,hold:false,t:0,raw:'',started:false};
+function orient(){return (typeof window.orientation==='number')?window.orientation:0;}
+function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
+function nrm(a){var l=Math.sqrt(dot(a,a))||1;return [a[0]/l,a[1]/l,a[2]/l];}
+function onMotion(e){
+  var a=e.accelerationIncludingGravity;
+  if(!a||a.x===null||a.x===undefined){return;}
+  var vx=a.x,vy=a.y,vz=a.z,mag=Math.sqrt(vx*vx+vy*vy+vz*vz);
+  if(mag<0.05){return;}
+  var o=orient(),Rr,Uu;
+  if(o===90){Rr=-vy;Uu=vx;}else if(o===-90){Rr=vy;Uu=-vx;}else if(o===180){Rr=-vx;Uu=-vy;}else{Rr=vx;Uu=vy;}
+  var Nn=vz;
+  m.t=Date.now();
+  if(S.gAuto){
+    m.sumU+=Uu/mag;m.n++;
+    if(m.n>=25){
+      var av=m.sumU/m.n;m.n=0;m.sumU=0;
+      if(Math.abs(av)>0.6){S.fG=av>0?-1:1;S.gAuto=false;m.f=null;save();}
+    }
+  }
+  var dv=[S.fG*Rr/mag,S.fG*Uu/mag,S.fG*Nn/mag];
+  var unit=mag<3?1:9.81,dev=Math.abs(mag/unit-1);
+  m.raw=vx.toFixed(2)+' '+vy.toFixed(2)+' '+vz.toFixed(2);
+  if(dev>0.12){m.hold=true;return;}
+  m.hold=false;
+  var now=m.t,dt=m.last?clamp((now-m.last)/1000,0.001,0.25):0.016;m.last=now;
+  if(!m.f){m.f=dv;}else{var k=1-Math.exp(-dt/0.35);for(var i=0;i<3;i++){m.f[i]+=(dv[i]-m.f[i])*k;}}
+  calc();
+}
+function d0now(){return S.d0[String(orient())]||[0,-1,0];}
+function calc(){
+  if(!m.f){return;}
+  var f=nrm(m.f),dd=nrm(d0now());
+  var Rv=[1,0,0],rd=dot(Rv,dd);
+  var rp=nrm([Rv[0]-dd[0]*rd,Rv[1]-dd[1]*rd,Rv[2]-dd[2]*rd]);
+  var back=[dd[1]*rp[2]-dd[2]*rp[1],dd[2]*rp[0]-dd[0]*rp[2],dd[0]*rp[1]-dd[1]*rp[0]];
+  var roll=Math.atan2(dot(f,rp),dot(f,dd))*R2D;
+  var pitch=Math.asin(clamp(dot(f,back),-1,1))*R2D;
+  if(S.fRoll){roll=-roll;}
+  if(S.fPitch){pitch=-pitch;}
+  tilt.roll=roll;tilt.pitch=pitch;tilt.t=Date.now();tilt.sim=false;
+  if(!m.hold){
+    if(roll>tilt.mR){tilt.mR=roll;}
+    if(-roll>tilt.mL){tilt.mL=-roll;}
+    if(pitch>tilt.mU){tilt.mU=pitch;}
+    if(-pitch>tilt.mD){tilt.mD=-pitch;}
+  }
+}
+function calibrate(){
+  if(!m.f||Date.now()-m.t>1500){toast('Нет данных датчика движения');return;}
+  S.d0[String(orient())]=nrm(m.f);save();
+  tilt.mR=tilt.mL=tilt.mU=tilt.mD=0;
+  toast('Ноль задан. Крен и тангаж отсчитываются от этого положения.');
+}
+
+/* ---------- demo ---------- */
+var T0=Date.now();
+function demoStep(){
+  var s=(Date.now()-T0)/1000,v=Math.max(0,52+48*Math.sin(s/7));
+  setL('speed',v);setL('rpm',850+v*34+70*Math.sin(s*3));setL('clt',88+2*Math.sin(s/20));
+  setL('volt',13.9+0.15*Math.sin(s));setL('thr',12+v/3.2);
+  if(Date.now()-m.t>2000){
+    tilt.roll=20*Math.sin(s/3.1);tilt.pitch=16*Math.sin(s/4.7);tilt.t=Date.now();tilt.sim=true;
+    tilt.mR=Math.max(tilt.mR,tilt.roll);tilt.mL=Math.max(tilt.mL,-tilt.roll);
+    tilt.mU=Math.max(tilt.mU,tilt.pitch);tilt.mD=Math.max(tilt.mD,-tilt.pitch);
+  }
+}
+
+/* ---------- GPS ---------- */
+var gpsId=null,gpsPrev=null;
+function gpsStart(){
+  if(!navigator.geolocation){setLink('GPS недоступен','bad');return;}
+  setLink('GPS: поиск…','wait');
+  gpsId=navigator.geolocation.watchPosition(function(p){
+    var c=p.coords,v=c.speed;
+    if(v===null||v===undefined||isNaN(v)){
+      if(gpsPrev&&c.accuracy<50){
+        var dtt=(p.timestamp-gpsPrev.t)/1000;
+        if(dtt>0.5){
+          var R=6371000,la1=gpsPrev.la*Math.PI/180,la2=c.latitude*Math.PI/180;
+          var dla=la2-la1,dlo=(c.longitude-gpsPrev.lo)*Math.PI/180;
+          var h=Math.sin(dla/2)*Math.sin(dla/2)+Math.cos(la1)*Math.cos(la2)*Math.sin(dlo/2)*Math.sin(dlo/2);
+          v=2*R*Math.asin(Math.sqrt(h))/dtt;
+        }
+      }
+    }
+    gpsPrev={t:p.timestamp,la:c.latitude,lo:c.longitude};
+    if(v!==null&&v!==undefined&&!isNaN(v)){setL('speed',v*3.6);setLink('GPS ±'+Math.round(c.accuracy)+' м','ok');}
+    else{setLink('GPS: нет скорости','wait');}
+  },function(er){setLink('GPS: '+(er.code===1?'нет доступа':'нет сигнала'),'bad');},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+}
+function gpsStop(){if(gpsId!==null){navigator.geolocation.clearWatch(gpsId);gpsId=null;gpsPrev=null;}}
+
+/* ---------- OBD-II over BLE (ELM327) ---------- */
+var OBD={dev:null,nc:null,wc:null,buf:'',waiter:null,run:false,want:false,retryT:null,i:0,fails:{},skip:{}};
+var OBD_SVC=[0xfff0,0xffe0,0x18f0,0xffb0,'e7810a71-73ae-499d-8c15-faa9aef0c3f2','49535343-fe7d-4ae5-8fa9-9fafd205e455','6e400001-b5a3-f393-e0a9-e50e24dcca9e'];
+var OBD_SEQ=['010D','010C','010D','0111','010D','010C','0105','010D','010C','ATRV'];
+OBD.connect=function(){
+  if(!navigator.bluetooth){return Promise.reject(new Error('NOBT'));}
+  setLink('OBD: поиск адаптера…','wait');
+  return navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:OBD_SVC}).then(function(d){
+    OBD.dev=d;d.addEventListener('gattserverdisconnected',OBD.onDrop);
+    return OBD.open();
+  });
+};
+OBD.open=function(){
+  setLink('OBD: подключение…','wait');
+  return OBD.dev.gatt.connect().then(function(s){return s.getPrimaryServices();}).then(function(svcs){
+    var found=null,chain=Promise.resolve();
+    svcs.forEach(function(svc){
+      chain=chain.then(function(){
+        if(found){return;}
+        return svc.getCharacteristics().then(function(chs){
+          var n=null,w=null;
+          chs.forEach(function(c){
+            var p=c.properties;
+            if(!n&&(p.notify||p.indicate)){n=c;}
+            if(!w&&(p.write||p.writeWithoutResponse)){w=c;}
+          });
+          if(n&&w){found={n:n,w:w};}
+        });
+      }).catch(function(){});
+    });
+    return chain.then(function(){
+      if(!found){throw new Error('Не найден последовательный канал адаптера (UART)');}
+      OBD.nc=found.n;OBD.wc=found.w;
+      OBD.nc.addEventListener('characteristicvaluechanged',OBD.onData);
+      return OBD.nc.startNotifications();
+    });
+  }).then(function(){return OBD.init();}).then(function(){
+    OBD.run=true;OBD.i=0;setLink('OBD: опрос…','wait');OBD.loop();
+  });
+};
+OBD.onData=function(ev){
+  var v=ev.target.value,s='';
+  for(var i=0;i<v.byteLength;i++){s+=String.fromCharCode(v.getUint8(i));}
+  OBD.buf+=s;
+  if(OBD.buf.indexOf('>')>=0&&OBD.waiter){var w=OBD.waiter;OBD.waiter=null;var b=OBD.buf;OBD.buf='';w(b);}
+};
+OBD.write=function(str){
+  var bytes=[],i;
+  for(i=0;i<str.length;i++){bytes.push(str.charCodeAt(i)&255);}
+  var c=OBD.wc,withResp=c.properties.write,p=Promise.resolve();
+  for(i=0;i<bytes.length;i+=20){
+    (function(chunk){
+      p=p.then(function(){var u=new Uint8Array(chunk);return withResp?c.writeValue(u):c.writeValueWithoutResponse(u);});
+    })(bytes.slice(i,i+20));
+  }
+  return p;
+};
+OBD.cmd=function(c,timeout){
+  return new Promise(function(res,rej){
+    OBD.buf='';
+    var to=setTimeout(function(){OBD.waiter=null;rej(new Error('timeout'));},timeout||3000);
+    OBD.waiter=function(txt){clearTimeout(to);res(txt);};
+    OBD.write(c+'\r').catch(function(er){clearTimeout(to);OBD.waiter=null;rej(er);});
+  });
+};
+OBD.init=function(){
+  var cmds=[['ATZ',4000],['ATE0',2000],['ATL0',2000],['ATS0',2000],['ATH0',2000],['ATSP0',2000],['0100',15000]];
+  var p=Promise.resolve();
+  cmds.forEach(function(x){p=p.then(function(){return OBD.cmd(x[0],x[1]);}).catch(function(){});});
+  return p;
+};
+function parseObd(cmd,txt){
+  var t=txt.replace(/\s/g,'').toUpperCase(),mm;
+  if(cmd==='ATRV'){mm=txt.match(/(\d+(?:\.\d+)?)\s*V/i);if(mm){setL('volt',parseFloat(mm[1]));return true;}return false;}
+  if(cmd==='010D'){mm=t.match(/410D([0-9A-F]{2})/);if(mm){setL('speed',parseInt(mm[1],16));return true;}}
+  else if(cmd==='010C'){mm=t.match(/410C([0-9A-F]{4})/);if(mm){setL('rpm',parseInt(mm[1],16)/4);return true;}}
+  else if(cmd==='0105'){mm=t.match(/4105([0-9A-F]{2})/);if(mm){setL('clt',parseInt(mm[1],16)-40);return true;}}
+  else if(cmd==='0111'){mm=t.match(/4111([0-9A-F]{2})/);if(mm){setL('thr',parseInt(mm[1],16)*100/255);return true;}}
+  return false;
+}
+OBD.loop=function(){
+  if(!OBD.run){return;}
+  var c=OBD_SEQ[OBD.i++%OBD_SEQ.length];
+  if(OBD.skip[c]){setTimeout(OBD.loop,0);return;}
+  OBD.cmd(c,2500).then(function(txt){
+    if(parseObd(c,txt)){OBD.fails[c]=0;setLink('OBD: данные идут','ok');}
+    else{
+      OBD.fails[c]=(OBD.fails[c]||0)+1;
+      if(/UNABLE|ERROR|STOPPED/i.test(txt)){setLink('OBD: нет связи с ЭБУ','bad');}
+      if(OBD.fails[c]>=4&&c!=='010D'){OBD.skip[c]=true;}
+    }
+    setTimeout(OBD.loop,0);
+  }).catch(function(){setTimeout(OBD.loop,300);});
+};
+OBD.onDrop=function(){
+  OBD.run=false;
+  if(!OBD.want){return;}
+  setLink('OBD: связь потеряна','bad');
+  clearTimeout(OBD.retryT);OBD.retryT=setTimeout(OBD.reopen,3000);
+};
+OBD.reopen=function(){
+  if(!OBD.want||!OBD.dev){return;}
+  OBD.open().catch(function(){setLink('OBD: повтор подключения…','wait');OBD.retryT=setTimeout(OBD.reopen,4000);});
+};
+OBD.stop=function(){
+  OBD.want=false;OBD.run=false;clearTimeout(OBD.retryT);
+  try{if(OBD.dev&&OBD.dev.gatt.connected){OBD.dev.gatt.disconnect();}}catch(e){}
+  OBD.dev=null;OBD.skip={};OBD.fails={};
+};
+function connectObd(){
+  if(!navigator.bluetooth){
+    setLink('OBD: нужен Bluefy','bad');
+    $('obdTxt').textContent='В этом браузере нет Web Bluetooth';
+    toast('Web Bluetooth не поддерживается. Откройте страницу в браузере Bluefy.',6000);
+    return;
+  }
+  if(OBD.want){OBD.stop();setLink('OBD: отключено','');refreshObd();return;}
+  if(S.src!=='obd'){setSource('obd',true);}
+  OBD.want=true;live={};
+  OBD.connect().then(refreshObd).catch(function(er){
+    OBD.want=false;
+    var msg=(er&&er.name==='NotFoundError')?'Адаптер не выбран':(er&&er.message)||'Ошибка подключения';
+    setLink('OBD: '+msg,'bad');toast(msg,5000);refreshObd();
+  });
+  refreshObd();
+}
+function refreshObd(){
+  $('btnObd').textContent=OBD.want?'Отключить':'Подключить';
+  $('obdTxt').textContent=OBD.want?'':(S.src==='obd'?'Нажмите «Подключить»':'');
+}
+
+/* ---------- source switching ---------- */
+function markSeg(id,val){
+  var bs=$(id).getElementsByTagName('button');
+  for(var i=0;i<bs.length;i++){bs[i].className=(bs[i].getAttribute('data-v')===String(val))?'on':'';}
+}
+function setSource(v,keepObd){
+  gpsStop();
+  if(v!=='obd'){OBD.stop();}
+  S.src=v;save();markSeg('segSrc',v);live={};
+  if(v==='demo'){setLink('Демо-данные','wait');}
+  else if(v==='gps'){gpsStart();}
+  else if(!keepObd){setLink('OBD: не подключено','');}
+  refreshObd();
+}
+
+/* ---------- tiles + frame loop ---------- */
+function setTile(id,val,col){var n=$(id);n.textContent=val;n.style.color=col||'';}
+function renderTiles(){
+  var rpm=getL('rpm',3000),clt=getL('clt',8000),vt=getL('volt',8000),th=getL('thr',3000);
+  setTile('vRpm',rpm===null?'—':String(Math.round(rpm/10)*10),rpm>=5500?'var(--bad)':(rpm>=4500?'var(--warn)':''));
+  var mr=$('mRpm');mr.style.width=(rpm===null?0:clamp(rpm/6000,0,1)*100)+'%';
+  mr.style.background=rpm>=5500?'var(--bad)':(rpm>=4500?'var(--warn)':'var(--amber)');
+  setTile('vClt',clt===null?'—':String(Math.round(clt)),clt>=108?'var(--bad)':(clt>=100?'var(--warn)':''));
+  setTile('vVolt',vt===null?'—':vt.toFixed(1),(vt!==null&&(vt<12||vt>14.8))?'var(--warn)':'');
+  setTile('vThr',th===null?'—':String(Math.round(th)),'');
+  var fresh=Date.now()-m.t<1500;
+  if(fresh){$('sdot').className=m.hold?'wait':'ok';$('sTxt').textContent=m.hold?'Датчик: разгон':'Датчик';}
+  else if(tilt.sim){$('sdot').className='wait';$('sTxt').textContent='Датчик: демо';}
+  else{$('sdot').className='bad';$('sTxt').textContent='Датчик: нет';}
+  if(!$('sheet').hidden){
+    $('dbg').textContent='ориентация '+orient()+'  ускорение '+(m.raw||'—')+'\nкрен '+tilt.roll.toFixed(1)+'°  тангаж '+tilt.pitch.toFixed(1)+'°'+(m.hold?'  (удержание)':'');
+  }
+}
+var shown=0,lastTiles=0;
+function frame(){
+  var now=Date.now();
+  if(S.src==='demo'){demoStep();}
+  var sv=getL('speed',4000);
+  shown+=((sv===null?0:sv)-shown)*0.16;
+  renderSpeed(shown);
+  renderDial(dRoll,tilt.roll,tilt.roll>=0.5?'ВПРАВО':(tilt.roll<=-0.5?'ВЛЕВО':'РОВНО'),'МАКС  Л '+Math.round(tilt.mL)+'°   П '+Math.round(tilt.mR)+'°');
+  renderDial(dPitch,tilt.pitch,tilt.pitch>=0.5?'НОС ВВЕРХ':(tilt.pitch<=-0.5?'НОС ВНИЗ':'РОВНО'),'МАКС  ↑ '+Math.round(tilt.mU)+'°   ↓ '+Math.round(tilt.mD)+'°');
+  if(now-lastTiles>250){lastTiles=now;renderTiles();}
+  requestAnimationFrame(frame);
+}
+
+/* ---------- UI wiring ---------- */
+function applyNight(){document.body.className=S.night?'night':'';}
+function syncSheet(){
+  markSeg('segSrc',S.src);markSeg('segMax',S.vmax);
+  $('inWarn').value=S.warn;$('inDanger').value=S.danger;
+  $('tgRoll').textContent=S.fRoll?'Да':'Нет';$('tgRoll').className='tg'+(S.fRoll?' on':'');
+  $('tgPitch').textContent=S.fPitch?'Да':'Нет';$('tgPitch').className='tg'+(S.fPitch?' on':'');
+  var up=S.fG===-1;$('tgG').textContent=up?'Да':'Нет';$('tgG').className='tg'+(up?' on':'');
+  refreshObd();
+}
+function rebuildDials(){dRoll=buildDial($('svRoll'),'КРЕН','roll');dPitch=buildDial($('svPitch'),'ТАНГАЖ','pitch');}
+function bindSeg(id,fn){
+  var bs=$(id).getElementsByTagName('button');
+  for(var i=0;i<bs.length;i++){(function(b){b.onclick=function(){fn(b.getAttribute('data-v'));};})(bs[i]);}
+}
+bindSeg('segSrc',function(v){if(v==='obd'){setSource('obd');connectObd();}else{setSource(v);}});
+bindSeg('segMax',function(v){S.vmax=parseInt(v,10);save();markSeg('segMax',v);buildSpeed();});
+$('inWarn').onchange=function(){S.warn=clamp(parseInt(this.value,10)||25,3,48);if(S.danger<=S.warn){S.danger=S.warn+5;}save();syncSheet();rebuildDials();};
+$('inDanger').onchange=function(){S.danger=clamp(parseInt(this.value,10)||35,S.warn+1,70);save();syncSheet();rebuildDials();};
+$('tgRoll').onclick=function(){S.fRoll=!S.fRoll;save();syncSheet();};
+$('tgPitch').onclick=function(){S.fPitch=!S.fPitch;save();syncSheet();};
+$('tgG').onclick=function(){S.fG=-S.fG;S.gAuto=false;m.f=null;save();syncSheet();};
+$('btnObd').onclick=connectObd;
+$('btnSet').onclick=function(){syncSheet();$('sheet').hidden=false;};
+$('btnClose').onclick=function(){$('sheet').hidden=true;};
+$('btnCal').onclick=calibrate;
+$('btnMax').onclick=function(){tilt.mR=tilt.mL=tilt.mU=tilt.mD=0;toast('Максимумы сброшены');};
+$('btnNight').onclick=function(){S.night=!S.night;save();applyNight();};
+$('btnStart').onclick=function(){
+  function go(){
+    $('start').hidden=true;m.started=true;
+    setTimeout(function(){
+      if(Date.now()-m.t>1500){toast('Датчик движения молчит. Проверьте: Настройки → Safari → Доступ к движению и ориентации.',8000);}
+    },3000);
+  }
+  if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function'){
+    DeviceMotionEvent.requestPermission().then(go).catch(go);
+  }else{go();}
+};
+window.addEventListener('devicemotion',onMotion,false);
+window.addEventListener('orientationchange',function(){m.f=null;});
+
+applyNight();buildSpeed();rebuildDials();
+var src0=S.src;S.src='demo';
+if(src0==='gps'){setSource('gps');}
+else if(src0==='obd'){setSource('obd');}
+else{setSource('demo');}
+requestAnimationFrame(frame);
+try{if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js');}}catch(e){}
+})();
+</script>
+</body>
+</html>
